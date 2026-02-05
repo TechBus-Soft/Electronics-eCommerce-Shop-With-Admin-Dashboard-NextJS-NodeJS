@@ -7,8 +7,8 @@ import bcrypt from "bcryptjs";
 import prisma from "@/utils/db";
 import { nanoid } from "nanoid";
 
-export const authOptions: NextAuthOptions = {
-  // Configure one or more authentication providers
+// ❌ DO NOT EXPORT authOptions in App Router
+const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       id: "credentials",
@@ -24,114 +24,61 @@ export const authOptions: NextAuthOptions = {
               email: credentials.email,
             },
           });
-          if (user) {
-            const isPasswordCorrect = await bcrypt.compare(
-              credentials.password,
-              user.password!
-            );
-            if (isPasswordCorrect) {
-              return {
-                id: user.id,
-                email: user.email,
-                role: user.role,
-              };
-            }
-          }
+
+          if (!user || !user.password) return null;
+
+          const isPasswordCorrect = await bcrypt.compare(
+            credentials.password,
+            user.password
+          );
+
+          if (!isPasswordCorrect) return null;
+
+          return {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+          };
         } catch (err: any) {
-          throw new Error(err);
+          throw new Error(err.message);
         }
-        return null;
       },
     }),
-    // Uncomment and configure these providers as needed
+
+    // OPTIONAL PROVIDERS (unchanged, still commented)
     // GithubProvider({
     //   clientId: process.env.GITHUB_ID!,
     //   clientSecret: process.env.GITHUB_SECRET!,
     // }),
+
     // GoogleProvider({
     //   clientId: process.env.GOOGLE_CLIENT_ID!,
     //   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     // }),
   ],
-  callbacks: {
-    async signIn({ user, account }: { user: AuthUser; account: Account }) {
-      if (account?.provider === "credentials") {
-        return true;
-      }
-      
-      // Handle OAuth providers
-      if (account?.provider === "github" || account?.provider === "google") {
-        try {
-          // Check if user exists in database
-          const existingUser = await prisma.user.findFirst({
-            where: {
-              email: user.email!,
-            },
-          });
 
-          if (!existingUser) {
-            // Create new user for OAuth providers
-            await prisma.user.create({
-              data: {
-                id: nanoid(),
-                email: user.email!,
-                role: "user",
-                // OAuth users don't have passwords
-                password: null,
-              },
-            });
-          }
-          return true;
-        } catch (error) {
-          console.error("Error in signIn callback:", error);
-          return false;
-        }
-      }
-      
-      return true;
-    },
+  session: {
+    strategy: "jwt",
+  },
+
+  callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = user.role;
-        token.id = user.id;
-        token.iat = Math.floor(Date.now() / 1000); // Issued at time
+        token.role = (user as any).role;
       }
-      
-      // Check if token is expired (15 minutes)
-      const now = Math.floor(Date.now() / 1000);
-      const tokenAge = now - (token.iat as number);
-      const maxAge = 15 * 60; // 15 minutes
-      
-      if (tokenAge > maxAge) {
-        // Token expired, return empty object to force re-authentication
-        return {};
-      }
-      
       return token;
     },
     async session({ session, token }) {
-      if (token) {
-        session.user.role = token.role as string;
-        session.user.id = token.id as string;
+      if (session.user) {
+        (session.user as any).role = token.role;
       }
       return session;
     },
   },
-  pages: {
-    signIn: '/login',
-    error: '/login', // Redirect to login page on auth errors
-  },
-  session: {
-    strategy: "jwt",
-    maxAge: 15 * 60, // 15 minutes in seconds
-    updateAge: 5 * 60, // Update session every 5 minutes
-  },
-  jwt: {
-    maxAge: 15 * 60, // 15 minutes in seconds
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === "development",
+
+  secret: process.env.JWT_SECRET,
 };
 
-export const handler = NextAuth(authOptions);
+// ✅ REQUIRED EXPORTS FOR APP ROUTER
+const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };
